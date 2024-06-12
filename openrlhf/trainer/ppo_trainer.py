@@ -191,6 +191,8 @@ class PPOTrainer(ABC):
                     torch.cuda.empty_cache()
                     self.kl_ctl.update(status["kl"], args.rollout_batch_size)
                     # logs/checkpoints
+                    status["actor_lr"] = self.actor_scheduler.get_last_lr()[0]
+                    status["critic_lr"] = self.critic_scheduler.get_last_lr()[0]
                     self.save_logs_and_checkpoints(args, global_step // update_timesteps, pbar, status)
 
                 pbar.update()

@@ -133,7 +133,9 @@ class Actor(nn.Module):
         eos_token_id = generate_args["eos_token_id"]
         pad_token_id = generate_args["pad_token_id"]
 
-        return self.process_sequences(sequences, input_ids.size(1), eos_token_id, pad_token_id)
+        proc_seq = self.process_sequences(sequences, input_ids.size(1), eos_token_id, pad_token_id)
+
+        return proc_seq
 
     def process_sequences(self, sequences: torch.Tensor, input_len, eos_token_id, pad_token_id):
         attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)
@@ -148,9 +150,9 @@ class Actor(nn.Module):
         #             sequences[i][min(t + 1, seq_length - 1)] = eos_token_id
         #             break
         #
-        eos_indices = seq_length - attention_mask.long().fliplr().argmax(dim=1, keepdim=True).clamp(min=1)
-        attention_mask.scatter_(dim=1, index=eos_indices, value=1)
-        sequences.scatter_(dim=1, index=eos_indices, value=eos_token_id)
+        # eos_indices = seq_length - attention_mask.long().fliplr().argmax(dim=1, keepdim=True).clamp(min=1)
+        # attention_mask.scatter_(dim=1, index=eos_indices, value=1)
+        # sequences.scatter_(dim=1, index=eos_indices, value=eos_token_id)
 
         # in RL, state_i (current token) + action_i (next token) -> state_i+1 (next token)
         state_seq = sequences[:, input_len - 1 : -1]

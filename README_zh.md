@@ -47,16 +47,17 @@ OpenRLHF 是一个基于 Ray、DeepSpeed 和 HF Transformers 构建的高性能 
 - 支持 [DPO (直接偏好优化)/IPO/cDPO](./examples/scripts/train_dpo_llama.sh).
 - 支持 [Kahneman-Tversky 优化 (KTO)](./examples/scripts/train_kto_llama.sh).
 - 支持 [拒绝采样](./examples/scripts/train_rejection_sampling_llama.sh).
+- 支持 [Iterative DPO](./examples/scripts/train_iterative_dpo_llama.sh) (https://github.com/RLHFlow/Online-RLHF).
 - 支持 [条件 SFT](./examples/scripts/train_conditional_llama.sh) (https://arxiv.org/abs/2308.12050).
 - 支持 [Mixtral 8*7b](./examples/test_scripts/train_sft_mixtral_lora.sh) (--aux_loss_coef)
 - 支持 Wandb 日志 (--wandb).
 - 支持 FlashAttention2 (--flash_attn).
 - 支持 QLoRA (--load_in_4bit), LoRA (--lora_rank, --target_modules).
+- 支持 HuggingFace `tokenizer.apply_chat_template` 用于数据集处理 (--apply_chat_template and --input_key).
 - 多节点 [训练脚本](./examples/scripts/train_llama_slurm.sh) 适用于 Slurm.
 
 **待办事项** 
 - 允许保存和加载训练检查点。
-- 支持混合 vLLM 推理引擎。
 
 **PPO 支持矩阵**
 
@@ -125,6 +126,9 @@ wandb.login()
 **单节点训练**
 
 ```shell
+# 继续预训练
+./train_continue_pretrain_llama.sh
+
 # 监督式微调
 ./train_sft_llama.sh
 
@@ -143,11 +147,11 @@ wandb.login()
 # 使用 vLLM 的拒绝采样训练
 ./train_rejection_sampling_llama.sh
 
+# Iterative DPO with vLLM
+./train_iterative_dpo_llama.sh
+
 # 条件 SFT
 ./train_conditional_llama.sh
-
-# 继续预训练
-./train_continue_pretrain_llama.sh
 ```
 
 **使用Ray进行PPO训练**
@@ -167,6 +171,9 @@ ray start --address {MASTER-NODE-ADDRESS}:6379  --num-gpus 8
 # 启动使用 vLLM 的 Ray PPO，默认配置需要 16 个 A100
 ./train_ppo_llama_ray_70b.sh
 ```
+
+> [!NOTE]
+> 我们建议使用 vLLM 0.4.2，因为 0.4.3 及以上版本目前只能通过 GLOO (--vllm_sync_backend gloo) 进行权重同步 (DeepSpeed => vLLM)。
 
 **在 Slurm 上进行多节点训练**
 

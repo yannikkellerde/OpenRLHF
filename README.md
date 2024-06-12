@@ -44,16 +44,17 @@ OpenRLHF is a high-performance RLHF framework built on Ray, DeepSpeed and HF Tra
 - Support [DPO (direct-preference-optimization)/IPO/cDPO](./examples/scripts/train_dpo_llama.sh).
 - Support [Kahneman-Tversky optimization (KTO)](./examples/scripts/train_kto_llama.sh).
 - Support [Rejection Sampling](./examples/scripts/train_rejection_sampling_llama.sh).
+- Support [Iterative DPO](./examples/scripts/train_iterative_dpo_llama.sh) (https://github.com/RLHFlow/Online-RLHF).
 - Support [Conditional SFT](./examples/scripts/train_conditional_llama.sh) (https://arxiv.org/abs/2308.12050).
 - Support [Mixtral 8*7b](./examples/test_scripts/train_sft_mixtral_lora.sh) (--aux_loss_coef)
 - Support Wandb log (--wandb).
 - Support FlashAttention2 (--flash_attn).
 - Support QLoRA (--load_in_4bit), LoRA (--lora_rank, --target_modules).
+- Support HuggingFace `tokenizer.apply_chat_template` in Datasets (--apply_chat_template and --input_key).
 - Multi-nodes [training scripts](./examples/scripts/train_llama_slurm.sh) for Slurm.
 
 **TODO** 
 - Allows saving and loading training checkpoints.
-- Support Hybrid vLLM inference engine.
 
 **PPO Support Matrix** 
 
@@ -124,6 +125,9 @@ wandb.login()
 **Single-node training**
 
 ```shell
+# Continue Pre-training
+./train_continue_pretrain_llama.sh
+
 # Supervised Finetuning
 ./train_sft_llama.sh
 
@@ -142,11 +146,11 @@ wandb.login()
 # Rejection Sampling with vLLM
 ./train_rejection_sampling_llama.sh
 
+# Iterative DPO with vLLM
+./train_iterative_dpo_llama.sh
+
 # Conditional SFT
 ./train_conditional_llama.sh
-
-# Continue Pre-training
-./train_continue_pretrain_llama.sh
 ```
 
 **PPO training with Ray**
@@ -166,6 +170,8 @@ ray start --address {MASTER-NODE-ADDRESS}:6379  --num-gpus 8
 # Launch Ray PPO with vLLM, requires 16 A100s in default config
 ./train_ppo_llama_ray_70b.sh
 ```
+> [!NOTE]
+> We recommend using vLLM 0.4.2, as versions 0.4.3+ currently only support weight synchronization (DeepSpeed => vLLM) via GLOO (--vllm_sync_backend gloo).
 
 **Multi-nodes training on Slurm**
 

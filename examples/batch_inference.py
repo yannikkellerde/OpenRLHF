@@ -29,7 +29,13 @@ def batch_generate_vllm(args):
     tokenizer = AutoTokenizer.from_pretrained(args.pretrain, trust_remote_code=True)
 
     # configure model
-    llm = LLM(model=args.pretrain, tensor_parallel_size=args.tp_size, trust_remote_code=True, seed=args.seed)
+    llm = LLM(
+        model=args.pretrain,
+        tensor_parallel_size=args.tp_size,
+        trust_remote_code=True,
+        seed=args.seed,
+        max_num_seqs=args.max_num_seqs,
+    )
 
     # Create a sampling params object.
     sampling_params = SamplingParams(
@@ -68,12 +74,11 @@ def batch_generate_vllm(args):
     N = args.best_of_n
     output_dataset = []
 
-    for _ in range(N):
-        outputs = llm.generate(prompts, sampling_params)
-        for output in outputs:
-            prompt = output.prompt
-            output = output.outputs[0].text
-            output_dataset.append({"input": prompt, "output": output})
+    outputs = llm.generate(prompts * N, sampling_params)
+    for output in outputs:
+        prompt = output.prompt
+        output = output.outputs[0].text
+        output_dataset.append({"input": prompt, "output": output})
 
     with jsonlines.open(args.output_path, mode="w") as writer:
         writer.write_all(output_dataset)
@@ -291,6 +296,7 @@ if __name__ == "__main__":
     # custom dataset key name
     parser.add_argument("--input_key", type=str, default=None)
     parser.add_argument("--output_key", type=str, default=None)
+    parser.add_argument("--apply_chat_template", action="store_true", default=False)
 
     # for generation
     parser.add_argument("--ta_prompt", type=str, default=None)
@@ -300,16 +306,17 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--repetition_penalty", type=float, default=1.2)
     parser.add_argument("--best_of_n", type=int, default=1)
-    parser.add_argument("--input_template", type=str, default="Human:\n{}\nAssistant:\n")
+    parser.add_argument("--input_template", type=str, default="Human: {}\nAssistant: ")
     parser.add_argument("--max_new_tokens", type=int, default=1024)
     parser.add_argument(
         "--post_processor",
         type=str,
         default=None,
-        help="set to rs (Rejection Sampling), ca (Conditional SFT) or None",
+        help="set to rs (Rejection Sampling), ca (Conditional SFT), iter_dpo (Iterative DPO) or None",
     )
     # for vllm
     parser.add_argument("--tp_size", type=int, default=8)
+    parser.add_argument("--max_num_seqs", type=int, default=256)
 
     # for Iterative generation and Rejection Sampling
     parser.add_argument("--iter", type=int, default=None)

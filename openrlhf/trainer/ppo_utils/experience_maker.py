@@ -204,6 +204,8 @@ class NaiveExperienceMaker(ABC):
 
         # Mask invalid responses
         values = action_mask * values
+        values = values * 0  # Test, Remove later
+
         rewards = action_mask * rewards
 
         for t in reversed(range(response_length)):

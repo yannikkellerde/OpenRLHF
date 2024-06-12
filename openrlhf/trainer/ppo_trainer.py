@@ -74,6 +74,7 @@ class PPOTrainer(ABC):
         prompt_max_len: int = 128,
         dataloader_pin_memory: bool = True,
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
+        advantage_normalization: bool = False,
         **generate_kwargs,
     ) -> None:
         assert (
@@ -83,6 +84,7 @@ class PPOTrainer(ABC):
         super().__init__()
         self.strategy = strategy
         self.args = strategy.args
+        self.advantage_normalization = advantage_normalization
         self.micro_rollout_batch_size = micro_rollout_batch_size
         self.max_epochs = max_epochs
         self.tokenizer = tokenizer
@@ -182,7 +184,8 @@ class PPOTrainer(ABC):
 
                 if global_step % update_timesteps == 0:
                     torch.cuda.empty_cache()
-                    self.replay_buffer.normalize("advantages", self.strategy)
+                    if self.advantage_normalization:
+                        self.replay_buffer.normalize("advantages", self.strategy)
                     status = self.ppo_train()
                     self.replay_buffer.clear()
                     torch.cuda.empty_cache()

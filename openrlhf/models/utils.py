@@ -37,7 +37,7 @@ def compute_reward(
         kl_coef = 0.0
 
     kl = compute_approx_kl(log_probs, log_probs_base, action_mask=action_mask)
-    kl_reward = -kl_coef * kl
+    kl_reward = torch.clamp(-kl_coef * kl, max=0.0)
 
     r = r.clamp(min=-10, max=10)
 

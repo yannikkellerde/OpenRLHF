@@ -1,4 +1,5 @@
 from typing import Optional, Tuple
+import time
 
 import torch
 import torch.distributed as dist
@@ -47,7 +48,10 @@ class PolicyLoss(nn.Module):
         loss = -torch.min(surr1, surr2)
         loss = masked_mean(loss, action_mask, dim=-1).mean()
         if loss > 10:
-            print("High loss", loss, surr1, surr2, torch.max(advantages), torch.min(advantages))
+            with open("high_loss.txt", "a") as f:
+                f.write(
+                    f"{time.strftime('%l:%M%p %Z on %b %d, %Y')}\n{loss = }\n{log_probs = }\n{old_log_probs = }\n{advantages = }\n{action_mask = }\n{ratio = }\n{surr1 = }\n{surr2 = }\n\n"
+                )
 
         return loss
 

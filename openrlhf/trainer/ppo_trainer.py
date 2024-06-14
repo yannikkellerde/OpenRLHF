@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import ray
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 from torch import Tensor
 from torch.optim import Optimizer
@@ -75,6 +76,7 @@ class PPOTrainer(ABC):
         dataloader_pin_memory: bool = True,
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
         advantage_normalization: bool = False,
+        add_new_token_reward_peak: Optional[float] = None,
         **generate_kwargs,
     ) -> None:
         assert (
@@ -98,6 +100,7 @@ class PPOTrainer(ABC):
         self.ema_beta = ema_beta
         self.gradient_checkpointing = gradient_checkpointing
         self.reward_fn = reward_fn
+        self.add_new_token_reward_peak = add_new_token_reward_peak
 
         self.actor = actor
         self.critic = critic
@@ -152,6 +155,7 @@ class PPOTrainer(ABC):
         prompts_dataloader,
         pretrain_dataloader,
         args,
+        token_add_callback=None,
     ) -> None:
         self.prompts_dataloader = prompts_dataloader
         self.pretrain_dataloader = pretrain_dataloader
@@ -175,6 +179,7 @@ class PPOTrainer(ABC):
             )
 
             for rand_prompts in self.prompts_dataloader:
+                print("making experience")
                 experience = self.experience_maker.make_experience(rand_prompts, **self.generate_kwargs)
                 # print prompt/answer in each update step
                 if global_step % update_timesteps == 0:
@@ -193,6 +198,9 @@ class PPOTrainer(ABC):
                     # logs/checkpoints
                     status["actor_lr"] = self.actor_scheduler.get_last_lr()[0]
                     status["critic_lr"] = self.critic_scheduler.get_last_lr()[0]
+                    if self.add_new_token_reward_peak is not None and token_add_callback is not None:
+                        if status["reward"] > self.add_new_token_reward_peak:
+                            token_add_callback()
                     self.save_logs_and_checkpoints(args, global_step // update_timesteps, pbar, status)
 
                 pbar.update()
@@ -268,6 +276,9 @@ class PPOTrainer(ABC):
             experience.sequences, num_actions, attention_mask=experience.attention_mask, return_output=True
         )
 
+        all_logprobs = F.log_softmax(output["logits"], dim=-1)
+        entropy = -(all_logprobs * all_logprobs.exp()).sum(-1).mean()
+
         # loss function
         actor_loss = self.actor_loss_fn(
             action_log_probs,
@@ -314,6 +325,7 @@ class PPOTrainer(ABC):
         # status
         status = {
             "policy_loss": actor_loss.item(),
+            "entropy": entropy.item(),
         }
         if self.pretrain_dataloader is not None:
             status["ptx_loss"] = ptx_loss.item()

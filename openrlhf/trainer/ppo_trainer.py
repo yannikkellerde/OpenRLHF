@@ -198,6 +198,7 @@ class PPOTrainer(ABC):
                     # logs/checkpoints
                     status["actor_lr"] = self.actor_scheduler.get_last_lr()[0]
                     status["critic_lr"] = self.critic_scheduler.get_last_lr()[0]
+                    print(status["reward"], self.add_new_token_reward_peak, token_add_callback is not None)
                     if self.add_new_token_reward_peak is not None and token_add_callback is not None:
                         if status["reward"] > self.add_new_token_reward_peak:
                             token_add_callback()
@@ -291,7 +292,7 @@ class PPOTrainer(ABC):
             aux_loss = output.aux_loss
         else:
             aux_loss = 0
-        loss = actor_loss + aux_loss * self.args.aux_loss_coef
+        loss = actor_loss + aux_loss * self.args.aux_loss_coef - self.args.entropy_coef * torch.log(entropy)
         self.strategy.backward(loss, self.actor, self.actor_optim)
 
         # ptx loss
@@ -393,6 +394,7 @@ class PPOTrainer(ABC):
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
         if global_step % args.save_steps == 0:
+            print("Saving checkpoint")
             tag = f"global_step{global_step}"
             self.strategy.save_ckpt(
                 self.actor.model, os.path.join(args.ckpt_path, "_actor"), tag, args.max_ckpt_num, args.max_ckpt_mem

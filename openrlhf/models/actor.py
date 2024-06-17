@@ -127,15 +127,22 @@ class Actor(nn.Module):
             generate_args["max_length"] = kwargs.get("max_length")
 
         # Call generate
-        sequences = self.model.generate(**generate_args)
+        out = self.model.generate(**generate_args, return_dict_in_generate=True, output_scores=True)
+        sequences = out.sequences
 
         # Prepare mask tensor
         eos_token_id = generate_args["eos_token_id"]
         pad_token_id = generate_args["pad_token_id"]
 
-        proc_seq = self.process_sequences(sequences, input_ids.size(1), eos_token_id, pad_token_id)
+        sequences, attention_mask, action_mask = self.process_sequences(
+            sequences, input_ids.size(1), eos_token_id, pad_token_id
+        )
 
-        return proc_seq
+        log_probs = log_probs_from_logits(
+            torch.stack(out["scores"]).transpose(0, 1), sequences[:, input_ids.size(1) :]
+        )
+
+        return sequences, attention_mask, action_mask, log_probs
 
     def process_sequences(self, sequences: torch.Tensor, input_len, eos_token_id, pad_token_id):
         attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)

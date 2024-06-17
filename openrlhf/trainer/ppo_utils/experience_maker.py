@@ -117,11 +117,27 @@ class NaiveExperienceMaker(ABC):
 
         # generate seq
         inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
-        sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        sequences, attention_mask, action_mask, generate_action_logprobs = self.actor.generate(
+            **inputs, **generate_kwargs
+        )
         num_actions = action_mask.size(1)
 
         # log probs
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
+        assert torch.allclose(action_log_probs, generate_action_logprobs), (
+            "action_log_probs mismatch",
+            action_log_probs,
+            generate_action_logprobs,
+            sequences,
+            action_log_probs.shape,
+            generate_action_logprobs.shape,
+        )
+        assert torch.all(torch.logical_or(action_log_probs > torch.log(torch.tensor(1e-10)), ~action_mask)), (
+            "super unlikely action sampled",
+            action_mask,
+            action_log_probs,
+            sequences,
+        )
 
         # init log probs
         base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)

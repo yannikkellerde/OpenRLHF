@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Union
 import ray
 import torch
 import torch.nn as nn
+import math
 from tqdm import tqdm
 
 from openrlhf.models.actor import Actor
@@ -85,6 +86,7 @@ class NaiveExperienceMaker(ABC):
         kl_controller,
         strategy=None,
         reward_fn=None,
+        logprobs_epsilon=None,
     ) -> None:
         super().__init__()
         self.actor = actor
@@ -96,6 +98,7 @@ class NaiveExperienceMaker(ABC):
         self.kl_ctl = kl_controller
         self.strategy = strategy
         self.reward_fn = reward_fn
+        self.logprobs_minimum = math.log(logprobs_epsilon) if logprobs_epsilon is not None else None
 
     # tokenizer
     def tokenize_fn(self, texts, max_length, device):
@@ -109,35 +112,26 @@ class NaiveExperienceMaker(ABC):
         return {k: v.to(device) for k, v in batch.items()}
 
     @torch.no_grad()
-    def make_experience(self, prompts: Union[str, List[str]], **generate_kwargs) -> Experience:
+    def make_experience(self, prompts: str | List[str | List[int]], **generate_kwargs) -> Experience:
         self.actor.eval()
         self.critic.eval()
         self.initial_model.eval()
         self.reward_model.eval()
 
         # generate seq
-        inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
-        sequences, attention_mask, action_mask, generate_action_logprobs = self.actor.generate(
-            **inputs, **generate_kwargs
-        )
+        if isinstance(prompts[0], str):
+            inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
+        else:
+            inputs = {"input_ids": torch.tensor(prompts).to("cuda")}
+            inputs["attention_mask"] = torch.ones_like(inputs["input_ids"])
+        sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+
         num_actions = action_mask.size(1)
 
         # log probs
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
-        assert torch.allclose(action_log_probs, generate_action_logprobs), (
-            "action_log_probs mismatch",
-            action_log_probs,
-            generate_action_logprobs,
-            sequences,
-            action_log_probs.shape,
-            generate_action_logprobs.shape,
-        )
-        assert torch.all(torch.logical_or(action_log_probs > torch.log(torch.tensor(1e-10)), ~action_mask)), (
-            "super unlikely action sampled",
-            action_mask,
-            action_log_probs,
-            sequences,
-        )
+        if self.logprobs_minimum is not None:
+            action_log_probs = action_log_probs.clamp(min=self.logprobs_minimum)
 
         # init log probs
         base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
@@ -146,7 +140,7 @@ class NaiveExperienceMaker(ABC):
         value = self.critic(sequences, action_mask, attention_mask)
 
         # rewards
-        r = self.reward_model(sequences, attention_mask)
+        r, _ = self.reward_model(sequences, attention_mask)
 
         reward, kl = compute_reward(
             r,

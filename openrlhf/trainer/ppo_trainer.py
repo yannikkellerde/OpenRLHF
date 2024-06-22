@@ -77,6 +77,8 @@ class PPOTrainer(ABC):
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
         advantage_normalization: bool = False,
         add_new_token_reward_peak: Optional[float] = None,
+        second_bound: Optional[float] = None,
+        logprobs_epsilon: Optional[float] = None,  # An attempt to avoid policy loss explosion
         **generate_kwargs,
     ) -> None:
         assert (
@@ -101,6 +103,7 @@ class PPOTrainer(ABC):
         self.gradient_checkpointing = gradient_checkpointing
         self.reward_fn = reward_fn
         self.add_new_token_reward_peak = add_new_token_reward_peak
+        self.logprobs_epsilon = logprobs_epsilon
 
         self.actor = actor
         self.critic = critic
@@ -112,7 +115,7 @@ class PPOTrainer(ABC):
         self.actor_scheduler = actor_scheduler
         self.critic_scheduler = critic_scheduler
 
-        self.actor_loss_fn = PolicyLoss(eps_clip)
+        self.actor_loss_fn = PolicyLoss(eps_clip, second_bound=second_bound)
         self.critic_loss_fn = ValueLoss(value_clip)
         self.ptx_loss_fn = GPTLMLoss()
 
@@ -125,7 +128,16 @@ class PPOTrainer(ABC):
             self.kl_ctl = FixedKLController(init_kl_coef)
 
         self.experience_maker = NaiveExperienceMaker(
-            actor, critic, reward_model, initial_model, tokenizer, prompt_max_len, self.kl_ctl, strategy, reward_fn
+            actor,
+            critic,
+            reward_model,
+            initial_model,
+            tokenizer,
+            prompt_max_len,
+            self.kl_ctl,
+            strategy,
+            reward_fn,
+            logprobs_epsilon=self.logprobs_epsilon,
         )
         self.replay_buffer = NaiveReplayBuffer(micro_train_batch_size, buffer_limit, buffer_cpu_offload)
 
@@ -141,7 +153,7 @@ class PPOTrainer(ABC):
                 project=strategy.args.wandb_project,
                 group=strategy.args.wandb_group,
                 name=strategy.args.wandb_run_name,
-                config=strategy.args.__dict__,
+                config={"args": strategy.args.__dict__, "generate_kwargs": generate_kwargs},
                 reinit=True,
             )
 
@@ -323,10 +335,19 @@ class PPOTrainer(ABC):
         if self.ema_model:
             self.strategy.moving_average(self.actor, self.ema_model, self.ema_beta, "cpu")
 
+        min_action_log_prob = action_log_probs.min().item()
+        min_experience_action_log_prob = experience.action_log_probs.min().item()
+        min_log_prob_diff = min_action_log_prob - min_experience_action_log_prob
+        abs_mean_log_prob_diff = (action_log_probs - experience.action_log_probs).abs().mean().item()
+
         # status
         status = {
             "policy_loss": actor_loss.item(),
             "entropy": entropy.item(),
+            "min_action_log_prob": min_action_log_prob,
+            "min_experience_action_log_prob": min_experience_action_log_prob,
+            "min_log_prob_diff": min_log_prob_diff,
+            "abs_mean_log_prob_diff": abs_mean_log_prob_diff,
         }
         if self.pretrain_dataloader is not None:
             status["ptx_loss"] = ptx_loss.item()

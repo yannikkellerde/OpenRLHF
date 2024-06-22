@@ -118,8 +118,12 @@ class Actor(nn.Module):
             "attention_mask": kwargs.get("attention_mask"),
             "eos_token_id": kwargs.get("eos_token_id"),
             "pad_token_id": kwargs.get("pad_token_id"),
-            "min_new_tokens": kwargs.get("min_new_tokens ", 1),
+            "min_new_tokens": kwargs.get("min_new_tokens", 1),
         }
+        print("\n\n", kwargs["min_new_tokens"], generate_args["min_new_tokens"], kwargs.get("min_new_tokens", 1))
+        print(type(kwargs), type(generate_args))
+        generate_args["min_new_tokens"] = kwargs.get("min_new_tokens", 1)
+        print(kwargs["min_new_tokens"], generate_args["min_new_tokens"], kwargs.get("min_new_tokens", 1))
 
         if kwargs.get("max_new_tokens", None):
             generate_args["max_new_tokens"] = kwargs.get("max_new_tokens")
@@ -127,8 +131,19 @@ class Actor(nn.Module):
             generate_args["max_length"] = kwargs.get("max_length")
 
         # Call generate
-        out = self.model.generate(**generate_args, return_dict_in_generate=True, output_scores=True)
-        sequences = out.sequences
+        sequences = self.model.generate(**generate_args)
+
+        if generate_args["min_new_tokens"] > 1:
+            if not torch.all(sequences != generate_args["eos_token_id"]):
+                for i in range(len(sequences)):
+                    if torch.any(sequences[i] == generate_args["eos_token_id"]):
+                        print(sequences[i])
+            assert torch.all(sequences != generate_args["eos_token_id"]), (
+                generate_args["eos_token_id"],
+                sequences.shape,
+                generate_args["min_new_tokens"],
+            )
+            print("Found no eos in genrated sequences")
 
         # Prepare mask tensor
         eos_token_id = generate_args["eos_token_id"]
@@ -138,11 +153,7 @@ class Actor(nn.Module):
             sequences, input_ids.size(1), eos_token_id, pad_token_id
         )
 
-        log_probs = log_probs_from_logits(
-            torch.stack(out["scores"]).transpose(0, 1), sequences[:, input_ids.size(1) :]
-        )
-
-        return sequences, attention_mask, action_mask, log_probs
+        return sequences, attention_mask, action_mask
 
     def process_sequences(self, sequences: torch.Tensor, input_len, eos_token_id, pad_token_id):
         attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)

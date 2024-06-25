@@ -120,10 +120,6 @@ class Actor(nn.Module):
             "pad_token_id": kwargs.get("pad_token_id"),
             "min_new_tokens": kwargs.get("min_new_tokens", 1),
         }
-        print("\n\n", kwargs["min_new_tokens"], generate_args["min_new_tokens"], kwargs.get("min_new_tokens", 1))
-        print(type(kwargs), type(generate_args))
-        generate_args["min_new_tokens"] = kwargs.get("min_new_tokens", 1)
-        print(kwargs["min_new_tokens"], generate_args["min_new_tokens"], kwargs.get("min_new_tokens", 1))
 
         if kwargs.get("max_new_tokens", None):
             generate_args["max_new_tokens"] = kwargs.get("max_new_tokens")
@@ -131,19 +127,8 @@ class Actor(nn.Module):
             generate_args["max_length"] = kwargs.get("max_length")
 
         # Call generate
-        sequences = self.model.generate(**generate_args)
-
-        if generate_args["min_new_tokens"] > 1:
-            if not torch.all(sequences != generate_args["eos_token_id"]):
-                for i in range(len(sequences)):
-                    if torch.any(sequences[i] == generate_args["eos_token_id"]):
-                        print(sequences[i])
-            assert torch.all(sequences != generate_args["eos_token_id"]), (
-                generate_args["eos_token_id"],
-                sequences.shape,
-                generate_args["min_new_tokens"],
-            )
-            print("Found no eos in genrated sequences")
+        out = self.model.generate(**generate_args, return_dict_in_generate=True, output_scores=True)
+        sequences = out.sequences
 
         # Prepare mask tensor
         eos_token_id = generate_args["eos_token_id"]
@@ -153,7 +138,11 @@ class Actor(nn.Module):
             sequences, input_ids.size(1), eos_token_id, pad_token_id
         )
 
-        return sequences, attention_mask, action_mask
+        log_probs = log_probs_from_logits(
+            torch.stack(out["scores"]).transpose(0, 1), sequences[:, input_ids.size(1) :]
+        )
+
+        return sequences, attention_mask, action_mask, log_probs
 
     def process_sequences(self, sequences: torch.Tensor, input_len, eos_token_id, pad_token_id):
         attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)
@@ -187,9 +176,11 @@ class Actor(nn.Module):
     ) -> torch.Tensor:
         """Returns action log probs"""
         # https://github.com/OpenLLMAI/OpenRLHF/issues/217
+
         position_ids = attention_mask.long().cumsum(-1) - 1
         position_ids.masked_fill_(attention_mask == 0, 1)
         output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
+
         log_probs = log_probs_from_logits(output["logits"][:, :-1, :], sequences[:, 1:])
 
         if return_output:

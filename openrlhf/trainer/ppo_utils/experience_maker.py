@@ -124,12 +124,44 @@ class NaiveExperienceMaker(ABC):
         else:
             inputs = {"input_ids": torch.tensor(prompts).to("cuda")}
             inputs["attention_mask"] = torch.ones_like(inputs["input_ids"])
-        sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+        sequences, attention_mask, action_mask, generate_action_logprobs = self.actor.generate(
+            **inputs, **generate_kwargs
+        )
 
         num_actions = action_mask.size(1)
 
         # log probs
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
+
+        """
+        if 50256 in sequences.flatten().tolist():
+            print("EOS token in sequences")
+            print(action_log_probs)
+            print(generate_action_logprobs)
+            print(sequences)
+            print("Min action log probs", action_log_probs.min().item())
+            print("Min generate log probs", generate_action_logprobs.min().item())
+            print("Attention mask", attention_mask, attention_mask.size())
+            print("Action mask", action_mask, action_mask.size())
+            self.actor.model.save_pretrained("actor_debug")
+            exit()
+        """
+
+        if action_log_probs.min().item() < -50:
+            print("Divergent action_log_probs")
+            print(action_log_probs)
+            print(generate_action_logprobs)
+            print(inputs)
+            print(sequences)
+            print("Min action log probs", action_log_probs.min().item())
+            print("Min generate log probs", generate_action_logprobs.min().item())
+            print(
+                "Diff between action_log_probs and generate_action_logprobs",
+                (action_log_probs - generate_action_logprobs).abs().mean().item(),
+            )
+            self.actor.model.save_pretrained("actor_debug")
+            exit()
+
         if self.logprobs_minimum is not None:
             action_log_probs = action_log_probs.clamp(min=self.logprobs_minimum)
 

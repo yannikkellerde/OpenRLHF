@@ -210,7 +210,6 @@ class PPOTrainer(ABC):
                     # logs/checkpoints
                     status["actor_lr"] = self.actor_scheduler.get_last_lr()[0]
                     status["critic_lr"] = self.critic_scheduler.get_last_lr()[0]
-                    print(status["reward"], self.add_new_token_reward_peak, token_add_callback is not None)
                     if self.add_new_token_reward_peak is not None and token_add_callback is not None:
                         if status["reward"] > self.add_new_token_reward_peak:
                             token_add_callback()
@@ -267,12 +266,15 @@ class PPOTrainer(ABC):
                 pbar.set_postfix(short_status)
 
         if status_list:
-            status_mean = status_list[0]
+            status_mean = status_list[0].copy()
             for m in status_list[1:]:
                 for k, v in m.items():
                     status_mean[k] += v
             for k in status_mean.keys():
                 status_mean[k] /= len(status_list)
+
+        status_mean["abs_mean_log_prob_diff_first"] = status_list[0]["abs_mean_log_prob_diff"]
+        status_mean["abs_mean_log_prob_diff_last"] = status_list[-1]["abs_mean_log_prob_diff"]
         return status_mean
 
     def training_step(self, experience: Experience) -> Dict[str, float]:
@@ -281,7 +283,7 @@ class PPOTrainer(ABC):
         return status
 
     def training_step_actor(self, experience: Experience) -> Dict[str, float]:
-        self.actor.train()
+        self.actor.eval()
 
         num_actions = experience.action_mask.size(1)
         # actor loss
@@ -335,10 +337,12 @@ class PPOTrainer(ABC):
         if self.ema_model:
             self.strategy.moving_average(self.actor, self.ema_model, self.ema_beta, "cpu")
 
-        min_action_log_prob = action_log_probs.min().item()
-        min_experience_action_log_prob = experience.action_log_probs.min().item()
+        alp_filtered = action_log_probs.flatten()[experience.action_mask.flatten().bool()]
+        exp_alp_filtered = experience.action_log_probs.flatten()[experience.action_mask.flatten().bool()]
+        min_action_log_prob = alp_filtered.min().item()
+        min_experience_action_log_prob = exp_alp_filtered.min().item()
         min_log_prob_diff = min_action_log_prob - min_experience_action_log_prob
-        abs_mean_log_prob_diff = (action_log_probs - experience.action_log_probs).abs().mean().item()
+        abs_mean_log_prob_diff = (alp_filtered - exp_alp_filtered).abs().mean().item()
 
         # status
         status = {
@@ -349,6 +353,7 @@ class PPOTrainer(ABC):
             "min_log_prob_diff": min_log_prob_diff,
             "abs_mean_log_prob_diff": abs_mean_log_prob_diff,
         }
+
         if self.pretrain_dataloader is not None:
             status["ptx_loss"] = ptx_loss.item()
         for k, v in experience.info.items():
